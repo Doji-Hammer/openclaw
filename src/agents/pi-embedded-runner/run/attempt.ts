@@ -38,6 +38,7 @@ import {
   validateGeminiTurns,
 } from "../../pi-embedded-helpers.js";
 import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
+import { buildHotState, enforceHotStateTokenCap } from "../../hot-state.js";
 import {
   ensurePiCompactionReserveTokens,
   resolveCompactionReserveTokensFloor,
@@ -736,6 +737,19 @@ export async function runEmbeddedAttempt(
             log.warn(`before_agent_start hook failed: ${String(hookErr)}`);
           }
         }
+
+        // Hot State: dispatcher-owned JSON blob, always included (size capped)
+        const hotState = buildHotState({
+          session_id: params.sessionId,
+          session_key: params.sessionKey ?? undefined,
+          run_id: params.runId,
+          risk_level: "low",
+        });
+        const cappedHotState = enforceHotStateTokenCap({ hotState, maxTokens: 1000 });
+        effectivePrompt = `${cappedHotState.json}\n\n${effectivePrompt}`;
+        cacheTrace?.recordStage("prompt:hot_state", {
+          note: `hot_state_tokens=${cappedHotState.tokens} truncated=${cappedHotState.wasTruncated}`,
+        });
 
         log.debug(`embedded run prompt start: runId=${params.runId} sessionId=${params.sessionId}`);
         cacheTrace?.recordStage("prompt:before", {
