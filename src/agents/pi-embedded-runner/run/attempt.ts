@@ -27,6 +27,7 @@ import {
   listChannelSupportedActions,
   resolveChannelMessageToolHints,
 } from "../../channel-tools.js";
+import { validateHotStateBudget } from "../../context-budget.js";
 import { resolveOpenClawDocsPath } from "../../docs-path.js";
 import { isTimeoutError } from "../../failover-error.js";
 import { buildHotState, enforceHotStateTokenCap } from "../../hot-state.js";
@@ -45,6 +46,11 @@ import {
 } from "../../pi-settings.js";
 import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { createOpenClawCodingTools } from "../../pi-tools.js";
+import {
+  capturePromptMetrics,
+  detectPromptRegressions,
+  formatPromptMetricsLog,
+} from "../../prompt-metrics.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
 import { repairSessionFileIfNeeded } from "../../session-file-repair.js";
@@ -356,6 +362,15 @@ export async function runEmbeddedAttempt(
       risk_level: "low",
     });
     const cappedHotState = enforceHotStateTokenCap({ hotState, maxTokens: 1000 });
+
+    // Budget validation: fail closed if hot state violates limits.
+    const budgetCheck = validateHotStateBudget(cappedHotState.hotState);
+    if (!budgetCheck.passed) {
+      log.warn(
+        `Hot state budget violated (${budgetCheck.violations.length} violations): ${budgetCheck.violations.map((v) => v.message).join("; ")}`,
+      );
+    }
+
     const extraSystemPrompt = [params.extraSystemPrompt, cappedHotState.json]
       .filter(Boolean)
       .join("\n\n");
@@ -411,6 +426,27 @@ export async function runEmbeddedAttempt(
     });
     const systemPromptOverride = createSystemPromptOverride(appendPrompt);
     const systemPromptText = systemPromptOverride();
+
+    // Prompt metrics: capture per-turn observability data for optimization tracking.
+    const artifactRefFiles = contextFiles.filter((f) =>
+      f.content.startsWith("ArtifactRef:"),
+    ).length;
+    const promptMetrics = capturePromptMetrics({
+      sessionId: params.sessionId,
+      runId: params.runId,
+      hotState: cappedHotState.hotState,
+      hotStateTruncated: cappedHotState.wasTruncated,
+      systemPromptChars: systemPromptText.length,
+      userContentChars: params.prompt?.length ?? 0,
+      artifactRefBootstrapFiles: artifactRefFiles,
+      budgetViolationCount: budgetCheck.violations.length,
+      budgetPassed: budgetCheck.passed,
+    });
+    log.info(formatPromptMetricsLog(promptMetrics));
+    const promptRegressionWarnings = detectPromptRegressions(promptMetrics);
+    for (const warning of promptRegressionWarnings) {
+      log.warn(`prompt-regression: ${warning}`);
+    }
 
     const sessionLock = await acquireSessionWriteLock({
       sessionFile: params.sessionFile,
