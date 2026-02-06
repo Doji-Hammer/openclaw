@@ -1,8 +1,24 @@
-import { z } from "zod";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { estimateTokens } from "@mariozechner/pi-coding-agent";
+import { z } from "zod";
 
 export type HotStateRiskLevel = "low" | "medium" | "high";
+
+export type ArtifactType = "repo" | "doc" | "code" | "log" | "data" | "plan" | "result";
+
+/**
+ * Reference to an artifact in the artifact store.
+ * Used to avoid embedding large content directly in hot state.
+ */
+export const ArtifactIndexEntrySchema = z.object({
+  artifact_id: z.string().min(1),
+  type: z.enum(["repo", "doc", "code", "log", "data", "plan", "result"]),
+  label: z.string().optional(),
+  version: z.string().optional(),
+  summary: z.string().optional(),
+});
+
+export type ArtifactIndexEntry = z.infer<typeof ArtifactIndexEntrySchema>;
 
 /**
  * Hot State is the small, structured JSON blob that should be included on every turn.
@@ -25,6 +41,9 @@ export const HotStateSchema = z
     constraints: z.array(z.string()).optional(),
     last_successful_step: z.string().min(1).optional(),
     risk_level: z.enum(["low", "medium", "high"]).optional(),
+
+    /** Artifact index: references to large content stored externally */
+    artifact_index: z.array(ArtifactIndexEntrySchema).optional(),
   })
   .strict();
 
@@ -47,10 +66,12 @@ export function estimateHotStateTokens(json: string): number {
   return estimateTokens(msg);
 }
 
-export function enforceHotStateTokenCap(params: {
+export function enforceHotStateTokenCap(params: { hotState: HotState; maxTokens?: number }): {
   hotState: HotState;
-  maxTokens?: number;
-}): { hotState: HotState; json: string; tokens: number; wasTruncated: boolean } {
+  json: string;
+  tokens: number;
+  wasTruncated: boolean;
+} {
   const maxTokens = Math.max(1, Math.floor(params.maxTokens ?? 1000));
 
   // First attempt: full hot state.

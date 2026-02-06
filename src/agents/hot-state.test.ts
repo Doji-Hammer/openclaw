@@ -40,4 +40,30 @@ describe("HotState", () => {
     const parsed = JSON.parse(capped.json) as Record<string, unknown>;
     expect(parsed.session_id).toBe("s1");
   });
+
+  it("includes artifact_index when provided", () => {
+    const hs = buildHotState({
+      session_id: "s1",
+      artifact_index: [
+        { artifact_id: "abc123", type: "doc", label: "spec.md", version: "v1" },
+        { artifact_id: "def456", type: "code", label: "main.ts" },
+      ],
+    });
+
+    expect(hs.artifact_index).toHaveLength(2);
+    expect(hs.artifact_index?.[0]?.artifact_id).toBe("abc123");
+    expect(hs.artifact_index?.[0]?.type).toBe("doc");
+  });
+
+  it("validates artifact_index entries strictly", () => {
+    expect(() =>
+      buildHotState({
+        session_id: "s1",
+        artifact_index: [
+          // @ts-expect-error testing invalid type
+          { artifact_id: "xyz", type: "invalid" },
+        ],
+      }),
+    ).toThrow();
+  });
 });
