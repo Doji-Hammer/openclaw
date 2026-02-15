@@ -5,6 +5,7 @@ import type { RunEmbeddedPiAgentParams } from "./run/params.js";
 import type { EmbeddedPiAgentMeta, EmbeddedPiRunResult } from "./types.js";
 import {
   generateTraceId,
+  getCurrentTraceId,
   getCurrentTraceContext,
   withTraceContext,
   startTelemetrySession,

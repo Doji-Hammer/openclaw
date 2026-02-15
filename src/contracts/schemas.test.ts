@@ -29,6 +29,7 @@ const now = Date.now();
 
 const validPlanRequest = {
   requestId: "req-001",
+  traceId: "trace-001",
   sessionId: "session-abc",
   sessionKey: "agent:main:telegram",
   channel: "telegram",
@@ -39,6 +40,7 @@ const validPlanRequest = {
 
 const validPlanArtifact = {
   requestId: "req-001",
+  traceId: "trace-001",
   provider: "anthropic",
   model: "claude-opus-4-6",
   sessionId: "session-abc",
@@ -49,6 +51,7 @@ const validPlanArtifact = {
 
 const validTaskEnvelope = {
   requestId: "req-001",
+  traceId: "trace-001",
   taskId: "task-001",
   planArtifact: validPlanArtifact,
   prompt: "Hello world",
@@ -59,6 +62,7 @@ const validTaskEnvelope = {
 const validResult = {
   taskId: "task-001",
   requestId: "req-001",
+  traceId: "trace-001",
   ok: true,
   payloads: [{ text: "Response text" }],
   producedBy: "executor" as const,
@@ -68,6 +72,7 @@ const validResult = {
 const validEscalation = {
   taskId: "task-001",
   requestId: "req-001",
+  traceId: "trace-001",
   reason: "repeated_failure" as const,
   description: "Model failed twice with same error",
   escalatedBy: "dispatcher" as const,
