@@ -137,7 +137,22 @@ function discoverInDirectory(params: {
 
   for (const entry of entries) {
     const fullPath = path.join(params.dir, entry.name);
-    if (entry.isFile()) {
+
+    // Resolve symlinks so that linked plugins/extensions are discovered.
+    let isFile = entry.isFile();
+    let isDirectory = entry.isDirectory();
+    if (entry.isSymbolicLink()) {
+      try {
+        const stat = fs.statSync(fullPath);
+        isFile = stat.isFile();
+        isDirectory = stat.isDirectory();
+      } catch {
+        // broken symlink – skip
+        continue;
+      }
+    }
+
+    if (isFile) {
       if (!isExtensionFile(fullPath)) {
         continue;
       }
@@ -151,7 +166,7 @@ function discoverInDirectory(params: {
         workspaceDir: params.workspaceDir,
       });
     }
-    if (!entry.isDirectory()) {
+    if (!isDirectory) {
       continue;
     }
 

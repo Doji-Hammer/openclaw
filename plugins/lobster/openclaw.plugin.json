@@ -1,0 +1,23 @@
+{
+  "id": "lobster",
+  "name": "Lobster Workflows",
+  "description": "Run Lobster workflow pipelines as an OpenClaw agent tool",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "lobsterDir": {
+        "type": "string",
+        "description": "Path to the Lobster repo root (contains bin/lobster.js)"
+      },
+      "workflowsDir": {
+        "type": "string",
+        "description": "Directory containing workflow files"
+      },
+      "stateDir": {
+        "type": "string",
+        "description": "Directory for Lobster state"
+      }
+    }
+  }
+}
