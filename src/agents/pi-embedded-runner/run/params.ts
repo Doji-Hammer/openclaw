@@ -21,6 +21,8 @@ export type ClientToolDefinition = {
 export type RunEmbeddedPiAgentParams = {
   sessionId: string;
   sessionKey?: string;
+  /** Trace ID for observability (B1-B4). */
+  traceId?: string;
   agentId?: string;
   messageChannel?: string;
   messageProvider?: string;

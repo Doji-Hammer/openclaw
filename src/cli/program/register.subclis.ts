@@ -41,6 +41,14 @@ const entries: SubCliEntry[] = [
     },
   },
   {
+    name: "telemetry",
+    description: "Observability and routing telemetry",
+    register: async (program) => {
+      const mod = await import("../telemetry-cli.js");
+      mod.registerTelemetryCli(program);
+    },
+  },
+  {
     name: "gateway",
     description: "Gateway control",
     register: async (program) => {
