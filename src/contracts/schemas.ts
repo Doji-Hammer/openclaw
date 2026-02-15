@@ -25,6 +25,8 @@ export const PlanRequestSchema = z
   .object({
     /** Unique request identifier (trace root). */
     requestId: z.string().min(1),
+    /** Trace ID for end-to-end observability (B1). */
+    traceId: z.string().min(1),
     /** Session identifier for context continuity. */
     sessionId: z.string().min(1),
     /** Session key (agent:channel:scope). */
@@ -58,6 +60,8 @@ export const PlanArtifactSchema = z
   .object({
     /** References the originating PlanRequest. */
     requestId: z.string().min(1),
+    /** Trace ID for end-to-end observability (B2-B3). */
+    traceId: z.string().min(1),
     /** Selected provider for execution. */
     provider: z.string().min(1),
     /** Selected model for execution. */
@@ -95,7 +99,9 @@ export type PlanArtifact = z.infer<typeof PlanArtifactSchema>;
 
 export const TaskEnvelopeSchema = z
   .object({
-    /** Trace id linking back to the original request. */
+    /** Trace id linking back to the original request (B4). */
+    traceId: z.string().min(1),
+    /** Request id linking back to the original request. */
     requestId: z.string().min(1),
     /** Unique task identifier. */
     taskId: z.string().min(1),
@@ -126,6 +132,8 @@ export type TaskEnvelope = z.infer<typeof TaskEnvelopeSchema>;
 
 export const ResultSchema = z
   .object({
+    /** Trace id linking back to the original request (B4). */
+    traceId: z.string().min(1),
     /** References the task that produced this result. */
     taskId: z.string().min(1),
     /** References the original request. */
@@ -195,6 +203,8 @@ export type Result = z.infer<typeof ResultSchema>;
 
 export const EscalationSignalSchema = z
   .object({
+    /** Trace id linking back to the original request. */
+    traceId: z.string().min(1),
     /** References the task that triggered escalation. */
     taskId: z.string().min(1),
     /** References the original request. */
