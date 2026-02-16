@@ -117,7 +117,9 @@ export function inferOutputRole(params: {
   // Subagent sessions: check label for role hints
   if (sessionKey?.includes(":subagent:")) {
     if (label) {
-      if (label.includes("plan")) return "planner";
+      if (label.includes("plan")) {
+        return "planner";
+      }
       if (label.includes("reason") || label.includes("analys") || label.includes("think")) {
         return "reasoner";
       }

@@ -174,7 +174,7 @@ describe("buildSummaryFallback", () => {
       artifactId: "abc123sha",
     });
     expect(fallback).toContain("abc123sha");
-    expect(fallback).toContain("artifacts.get");
+    expect(fallback).toContain("artifacts_get");
   });
 
   it("does not include artifact ref when not provided", () => {
@@ -183,7 +183,7 @@ describe("buildSummaryFallback", () => {
       output: "some output",
       violation,
     });
-    expect(fallback).not.toContain("artifacts.get");
+    expect(fallback).not.toContain("artifacts_get");
   });
 
   it("truncates long output in summary", () => {

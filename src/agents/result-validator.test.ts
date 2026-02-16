@@ -54,15 +54,13 @@ describe("validateResult", () => {
 
   it("stores oversized output as artifact when registry provided", async () => {
     const mockRegistry = {
-      storeText: vi
-        .fn()
-        .mockResolvedValue({
-          id: "sha256-abc",
-          mime: "text/plain",
-          createdAt: new Date().toISOString(),
-          sha256: "sha256-abc",
-          sizeBytes: 5000,
-        }),
+      storeText: vi.fn().mockResolvedValue({
+        id: "sha256-abc",
+        mime: "text/plain",
+        createdAt: new Date().toISOString(),
+        sha256: "sha256-abc",
+        sizeBytes: 5000,
+      }),
       storeJson: vi.fn(),
       get: vi.fn(),
     };

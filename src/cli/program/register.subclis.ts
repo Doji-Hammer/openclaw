@@ -1,8 +1,8 @@
 import type { Command } from "commander";
 import type { OpenClawConfig } from "../../config/config.js";
 import { isTruthyEnvValue } from "../../infra/env.js";
-import { buildParseArgv, getPrimaryCommand, hasHelpOrVersion } from "../argv.js";
-import { resolveActionArgs } from "./helpers.js";
+import { getPrimaryCommand, hasHelpOrVersion } from "../argv.js";
+import { reparseProgramFromActionArgs } from "./action-reparse.js";
 
 type SubCliRegistrar = (program: Command) => Promise<void> | void;
 
@@ -38,6 +38,14 @@ const entries: SubCliEntry[] = [
     register: async (program) => {
       const mod = await import("../acp-cli.js");
       mod.registerAcpCli(program);
+    },
+  },
+  {
+    name: "telemetry",
+    description: "Observability and routing telemetry",
+    register: async (program) => {
+      const mod = await import("../telemetry-cli.js");
+      mod.registerTelemetryCli(program);
     },
   },
   {
@@ -273,19 +281,7 @@ function registerLazyCommand(program: Command, entry: SubCliEntry) {
   placeholder.action(async (...actionArgs) => {
     removeCommand(program, placeholder);
     await entry.register(program);
-    const actionCommand = actionArgs.at(-1) as Command | undefined;
-    const root = actionCommand?.parent ?? program;
-    const rawArgs = (root as Command & { rawArgs?: string[] }).rawArgs;
-    const actionArgsList = resolveActionArgs(actionCommand);
-    const fallbackArgv = actionCommand?.name()
-      ? [actionCommand.name(), ...actionArgsList]
-      : actionArgsList;
-    const parseArgv = buildParseArgv({
-      programName: program.name(),
-      rawArgs,
-      fallbackArgv,
-    });
-    await program.parseAsync(parseArgv);
+    await reparseProgramFromActionArgs(program, actionArgs);
   });
 }
 

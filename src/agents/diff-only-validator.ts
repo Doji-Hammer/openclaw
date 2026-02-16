@@ -55,7 +55,9 @@ export function looksLikeUnifiedDiff(text: string): boolean {
  */
 export function looksLikeJsonPatch(text: string): boolean {
   const trimmed = text.trim();
-  if (!trimmed.startsWith("[")) return false;
+  if (!trimmed.startsWith("[")) {
+    return false;
+  }
   const matchCount = JSON_PATCH_MARKERS.filter((re) => re.test(trimmed)).length;
   return matchCount >= 2;
 }
@@ -65,21 +67,27 @@ export function looksLikeJsonPatch(text: string): boolean {
  */
 export function looksLikeFullFileRewrite(text: string): boolean {
   // If it looks like a diff, it's not a full rewrite
-  if (looksLikeUnifiedDiff(text)) return false;
-  if (looksLikeJsonPatch(text)) return false;
+  if (looksLikeUnifiedDiff(text)) {
+    return false;
+  }
+  if (looksLikeJsonPatch(text)) {
+    return false;
+  }
 
   // Count lines that look like unchanged source code (no +/- prefix)
   const lines = text.split("\n");
   const totalLines = lines.length;
 
-  if (totalLines < 10) return false; // too short to judge
+  if (totalLines < 10) {
+    return false;
+  } // too short to judge
 
   // Count lines that start with diff markers vs plain code
   let diffPrefixed = 0;
   let codeLike = 0;
 
   for (const line of lines) {
-    if (/^[+-]/.test(line) || /^@@/.test(line) || /^(---|\+\+\+)/.test(line)) {
+    if (/^[+-]/.test(line) || line.startsWith("@@") || /^(---|\+\+\+)/.test(line)) {
       diffPrefixed++;
     } else if (line.trim().length > 0) {
       codeLike++;
@@ -88,7 +96,9 @@ export function looksLikeFullFileRewrite(text: string): boolean {
 
   // If less than 10% of content lines are diff-prefixed, it's likely a full rewrite
   const total = diffPrefixed + codeLike;
-  if (total === 0) return false;
+  if (total === 0) {
+    return false;
+  }
 
   const diffRatio = diffPrefixed / total;
   return diffRatio < 0.1 && codeLike > 15;

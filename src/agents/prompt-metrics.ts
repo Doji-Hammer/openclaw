@@ -59,7 +59,7 @@ export function capturePromptMetrics(input: PromptMetricsInput): PromptMetrics {
   const hotStateTokens = estimateHotStateTokens(json);
   const hotStateBytes = Buffer.byteLength(json, "utf-8");
   const artifactIndex = input.hotState.artifact_index ?? [];
-  const artifactTypes = [...new Set(artifactIndex.map((a) => a.type))].sort();
+  const artifactTypes = [...new Set(artifactIndex.map((a) => a.type))].toSorted();
 
   const totalChars = input.systemPromptChars + input.userContentChars + json.length;
   const estimatedPromptTokens = Math.ceil(totalChars / 4);

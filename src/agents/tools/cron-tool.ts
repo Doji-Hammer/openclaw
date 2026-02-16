@@ -3,7 +3,8 @@ import type { CronDelivery, CronMessageChannel } from "../../cron/types.js";
 import { loadConfig } from "../../config/config.js";
 import { normalizeCronJobCreate, normalizeCronJobPatch } from "../../cron/normalize.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
-import { truncateUtf16Safe } from "../../utils.js";
+import { extractTextFromChatContent } from "../../shared/chat-content.js";
+import { isRecord, truncateUtf16Safe } from "../../utils.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
 import { optionalStringEnum, stringEnum } from "../schema/typebox.js";
 import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
@@ -18,6 +19,7 @@ import { resolveInternalSessionKey, resolveMainSessionAlias } from "./sessions-h
 const CRON_ACTIONS = ["status", "list", "add", "update", "remove", "run", "runs", "wake"] as const;
 
 const CRON_WAKE_MODES = ["now", "next-heartbeat"] as const;
+const CRON_RUN_MODES = ["due", "force"] as const;
 
 const REMINDER_CONTEXT_MESSAGES_MAX = 10;
 const REMINDER_CONTEXT_PER_MESSAGE_MAX = 220;
@@ -37,6 +39,7 @@ const CronToolSchema = Type.Object({
   patch: Type.Optional(Type.Object({}, { additionalProperties: true })),
   text: Type.Optional(Type.String()),
   mode: optionalStringEnum(CRON_WAKE_MODES),
+  runMode: optionalStringEnum(CRON_RUN_MODES),
   contextMessages: Type.Optional(
     Type.Number({ minimum: 0, maximum: REMINDER_CONTEXT_MESSAGES_MAX }),
   ),
@@ -67,38 +70,13 @@ function truncateText(input: string, maxLen: number) {
   return `${truncated}...`;
 }
 
-function normalizeContextText(raw: string) {
-  return raw.replace(/\s+/g, " ").trim();
-}
-
 function extractMessageText(message: ChatMessage): { role: string; text: string } | null {
   const role = typeof message.role === "string" ? message.role : "";
   if (role !== "user" && role !== "assistant") {
     return null;
   }
-  const content = message.content;
-  if (typeof content === "string") {
-    const normalized = normalizeContextText(content);
-    return normalized ? { role, text: normalized } : null;
-  }
-  if (!Array.isArray(content)) {
-    return null;
-  }
-  const chunks: string[] = [];
-  for (const block of content) {
-    if (!block || typeof block !== "object") {
-      continue;
-    }
-    if ((block as { type?: unknown }).type !== "text") {
-      continue;
-    }
-    const text = (block as { text?: unknown }).text;
-    if (typeof text === "string" && text.trim()) {
-      chunks.push(text);
-    }
-  }
-  const joined = normalizeContextText(chunks.join(" "));
-  return joined ? { role, text: joined } : null;
+  const text = extractTextFromChatContent(message.content);
+  return text ? { role, text } : null;
 }
 
 async function buildReminderContextLines(params: {
@@ -155,10 +133,6 @@ async function buildReminderContextLines(params: {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function stripThreadSuffixFromSessionKey(sessionKey: string): string {
   const normalized = sessionKey.toLowerCase();
   const idx = normalized.lastIndexOf(":thread:");
@@ -188,15 +162,16 @@ function inferDeliveryFromSessionKey(agentSessionKey?: string): CronDelivery | n
   }
 
   // buildAgentPeerSessionKey encodes peers as:
-  // - dm:<peerId>
-  // - <channel>:dm:<peerId>
-  // - <channel>:<accountId>:dm:<peerId>
+  // - direct:<peerId>
+  // - <channel>:direct:<peerId>
+  // - <channel>:<accountId>:direct:<peerId>
   // - <channel>:group:<peerId>
   // - <channel>:channel:<peerId>
+  // Note: legacy keys may use "dm" instead of "direct".
   // Threaded sessions append :thread:<id>, which we strip so delivery targets the parent peer.
   // NOTE: Telegram forum topics encode as <chatId>:topic:<topicId> and should be preserved.
   const markerIndex = parts.findIndex(
-    (part) => part === "dm" || part === "group" || part === "channel",
+    (part) => part === "direct" || part === "dm" || part === "group" || part === "channel",
   );
   if (markerIndex === -1) {
     return null;
@@ -298,6 +273,57 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
             }),
           );
         case "add": {
+          // Flat-params recovery: non-frontier models (e.g. Grok) sometimes flatten
+          // job properties to the top level alongside `action` instead of nesting
+          // them inside `job`. When `params.job` is missing or empty, reconstruct
+          // a synthetic job object from any recognised top-level job fields.
+          // See: https://github.com/openclaw/openclaw/issues/11310
+          if (
+            !params.job ||
+            (typeof params.job === "object" &&
+              params.job !== null &&
+              Object.keys(params.job as Record<string, unknown>).length === 0)
+          ) {
+            const JOB_KEYS: ReadonlySet<string> = new Set([
+              "name",
+              "schedule",
+              "sessionTarget",
+              "wakeMode",
+              "payload",
+              "delivery",
+              "enabled",
+              "description",
+              "deleteAfterRun",
+              "agentId",
+              "message",
+              "text",
+              "model",
+              "thinking",
+              "timeoutSeconds",
+              "allowUnsafeExternalContent",
+            ]);
+            const synthetic: Record<string, unknown> = {};
+            let found = false;
+            for (const key of Object.keys(params)) {
+              if (JOB_KEYS.has(key) && params[key] !== undefined) {
+                synthetic[key] = params[key];
+                found = true;
+              }
+            }
+            // Only use the synthetic job if at least one meaningful field is present
+            // (schedule, payload, message, or text are the minimum signals that the
+            // LLM intended to create a job).
+            if (
+              found &&
+              (synthetic.schedule !== undefined ||
+                synthetic.payload !== undefined ||
+                synthetic.message !== undefined ||
+                synthetic.text !== undefined)
+            ) {
+              params.job = synthetic;
+            }
+          }
+
           if (!params.job || typeof params.job !== "object") {
             throw new Error("job required");
           }
@@ -312,7 +338,6 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
             }
           }
 
-          // [Fix Issue 3] Infer delivery target from session key for isolated jobs if not provided
           if (
             opts?.agentSessionKey &&
             job &&
@@ -393,7 +418,9 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
           if (!id) {
             throw new Error("jobId required (id accepted for backward compatibility)");
           }
-          return jsonResult(await callGatewayTool("cron.run", gatewayOpts, { id }));
+          const runMode =
+            params.runMode === "due" || params.runMode === "force" ? params.runMode : "force";
+          return jsonResult(await callGatewayTool("cron.run", gatewayOpts, { id, mode: runMode }));
         }
         case "runs": {
           const id = readStringParam(params, "jobId") ?? readStringParam(params, "id");

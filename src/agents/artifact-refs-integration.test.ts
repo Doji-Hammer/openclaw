@@ -160,7 +160,7 @@ describe("Artifact References Integration", () => {
     });
 
     // Verify the artifact can be retrieved by the ID in the index
-    const entry = hotState.artifact_index![0]!;
+    const entry = hotState.artifact_index![0];
     const retrieved = await registry.get(entry.artifact_id);
     expect(retrieved.content).toBe(largeContent);
     expect(retrieved.meta.sha256).toBe(meta.sha256);

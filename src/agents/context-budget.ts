@@ -129,7 +129,7 @@ export function validatePromptBudget(params: {
   // 4. Inline artifact size
   const inlineArtifacts = params.inlineArtifactChars ?? [];
   for (let i = 0; i < inlineArtifacts.length; i++) {
-    const chars = inlineArtifacts[i]!;
+    const chars = inlineArtifacts[i];
     if (chars > resolved.maxInlineArtifactChars) {
       violations.push({
         field: `inline_artifact[${i}]`,
