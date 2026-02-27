@@ -540,4 +540,87 @@ describe("runEmbeddedPiAgent", () => {
     expect(result.meta.error).toBeUndefined();
     expect(result.payloads?.length ?? 0).toBeGreaterThan(0);
   });
+
+  it(
+    "proactively auto-compacts when session token usage exceeds configured ratio",
+    { timeout: 90_000 },
+    async () => {
+      const { SessionManager } = await import("@mariozechner/pi-coding-agent");
+      const sessionFile = nextSessionFile();
+
+      // Seed transcript with enough tokens to trip a tiny threshold.
+      const sessionManager = SessionManager.open(sessionFile);
+      const longText = "hello ".repeat(80);
+      for (let i = 0; i < 10; i++) {
+        sessionManager.appendMessage({
+          role: "user",
+          content: [{ type: "text", text: `${i} ${longText}` }],
+        });
+        sessionManager.appendMessage({
+          role: "assistant",
+          content: [{ type: "text", text: `${i} ack ${longText}` }],
+          stopReason: "stop",
+          api: "openai-responses",
+          provider: "openai",
+          model: "mock-1",
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 2,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          timestamp: Date.now(),
+        });
+      }
+
+      const cfg = {
+        ...makeOpenAiConfig(["mock-1"]),
+        agents: {
+          defaults: {
+            safeguards: {
+              sessionAutoCompact: {
+                enabled: true,
+                thresholdContextRatio: 0.01,
+                minIntervalMs: 0,
+              },
+            },
+          },
+        },
+      } as const;
+      await ensureModels(cfg);
+
+      const events: Array<{ phase: string; auto?: boolean }> = [];
+
+      const result = await runEmbeddedPiAgent({
+        sessionId: "session:test",
+        sessionKey: testSessionKey,
+        sessionFile,
+        workspaceDir,
+        config: cfg,
+        prompt: "hello",
+        provider: "openai",
+        model: "mock-1",
+        timeoutMs: 5_000,
+        agentDir,
+        enqueue: immediateEnqueue,
+        runId: "run-auto-compact",
+        onAgentEvent: async (evt) => {
+          if (evt.stream !== "compaction") {
+            return;
+          }
+          const phase = typeof (evt.data as any)?.phase === "string" ? (evt.data as any).phase : "";
+          const auto = Boolean((evt.data as any)?.auto);
+          if (phase) {
+            events.push({ phase, auto });
+          }
+        },
+      });
+
+      expect(result.meta.error).toBeUndefined();
+      expect(events.some((e) => e.phase === "start" && e.auto)).toBe(true);
+      expect(events.some((e) => e.phase === "end" && e.auto)).toBe(true);
+    },
+  );
 });

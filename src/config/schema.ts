@@ -299,6 +299,12 @@ const FIELD_LABELS: Record<string, string> = {
     "Session Token Warning Threshold Ratio",
   "agents.defaults.safeguards.sessionTokenWarning.minIntervalMs":
     "Session Token Warning Min Interval (ms)",
+  "agents.defaults.safeguards.sessionAutoCompact": "Session Auto-Compaction",
+  "agents.defaults.safeguards.sessionAutoCompact.enabled": "Session Auto-Compaction Enabled",
+  "agents.defaults.safeguards.sessionAutoCompact.thresholdContextRatio":
+    "Session Auto-Compaction Threshold Ratio",
+  "agents.defaults.safeguards.sessionAutoCompact.minIntervalMs":
+    "Session Auto-Compaction Min Interval (ms)",
   "agents.defaults.cliBackends": "CLI Backends",
   "commands.native": "Native Commands",
   "commands.nativeSkills": "Native Skill Commands",
@@ -668,6 +674,14 @@ const FIELD_HELP: Record<string, string> = {
     "Context usage ratio (totalTokens/contextTokens) that triggers a warning (default: 0.8).",
   "agents.defaults.safeguards.sessionTokenWarning.minIntervalMs":
     "Minimum interval between warnings per session (default: 600000).",
+  "agents.defaults.safeguards.sessionAutoCompact":
+    "Automatically compact sessions when token usage exceeds a configurable ratio of the context window.",
+  "agents.defaults.safeguards.sessionAutoCompact.enabled":
+    "Enable session auto-compaction (default: false).",
+  "agents.defaults.safeguards.sessionAutoCompact.thresholdContextRatio":
+    "Context usage ratio (totalTokens/contextTokens) that triggers auto-compaction (default: 0.5).",
+  "agents.defaults.safeguards.sessionAutoCompact.minIntervalMs":
+    "Minimum interval between auto-compactions per session (default: 600000).",
   "commands.native":
     "Register native commands with channels that support it (Discord/Slack/Telegram).",
   "commands.nativeSkills":

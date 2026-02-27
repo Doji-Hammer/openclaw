@@ -116,6 +116,14 @@ export const AgentDefaultsSchema = z
           })
           .strict()
           .optional(),
+        sessionAutoCompact: z
+          .object({
+            enabled: z.boolean().optional(),
+            thresholdContextRatio: z.number().min(0).max(1).optional(),
+            minIntervalMs: z.number().int().positive().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

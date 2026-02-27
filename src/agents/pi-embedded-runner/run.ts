@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
-import type { RunEmbeddedPiAgentParams } from "./run/params.js";
-import type { EmbeddedPiAgentMeta, EmbeddedPiRunResult } from "./types.js";
+import { emitAgentEvent } from "../../infra/agent-events.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
@@ -51,7 +50,18 @@ import { resolveGlobalLane, resolveSessionLane } from "./lanes.js";
 import { log } from "./logger.js";
 import { resolveModel } from "./model.js";
 import { runEmbeddedAttempt } from "./run/attempt.js";
+import type { RunEmbeddedPiAgentParams } from "./run/params.js";
 import { buildEmbeddedRunPayloads } from "./run/payloads.js";
+import {
+  decideSessionAutoCompact,
+  estimateSessionTotalTokens,
+  getAutoCompactState,
+  hasOversizedMessageForSummary,
+  readSessionMessagesFromJsonl,
+  resolveSessionAutoCompactConfig,
+  setAutoCompactState,
+} from "./session-auto-compact.js";
+import type { EmbeddedPiAgentMeta, EmbeddedPiRunResult } from "./types.js";
 import { describeUnknownError } from "./utils.js";
 
 type ApiKeyInfo = ResolvedProviderAuth;
@@ -328,6 +338,98 @@ export async function runEmbeddedPiAgent(
 
           const prompt =
             provider === "anthropic" ? scrubAnthropicRefusalMagic(params.prompt) : params.prompt;
+
+          // Session auto-compaction safeguard: proactively compact when the session
+          // is consuming too much of the context window.
+          const autoCompactCfg = resolveSessionAutoCompactConfig(params.config);
+          if (autoCompactCfg.enabled) {
+            const stateKey = (params.sessionKey?.trim() || params.sessionId).trim();
+            const state = getAutoCompactState(stateKey);
+            try {
+              const contextTokens = Math.max(
+                1,
+                Math.floor(model.contextWindow ?? DEFAULT_CONTEXT_TOKENS),
+              );
+              const messages = await readSessionMessagesFromJsonl(params.sessionFile);
+              const totalTokens = estimateSessionTotalTokens(messages);
+
+              const decision = decideSessionAutoCompact({
+                cfg: autoCompactCfg,
+                totalTokens,
+                contextTokens,
+                now: Date.now(),
+                lastAutoCompactAt: state.lastAt,
+                lastAutoCompactAtTokens: state.lastAtTokens,
+              });
+
+              if (decision.shouldCompact) {
+                if (hasOversizedMessageForSummary(messages, contextTokens)) {
+                  // Never auto-compact when the transcript contains a single oversized entry.
+                  setAutoCompactState(stateKey, { lastAt: Date.now(), lastAtTokens: totalTokens });
+                } else {
+                  // Emit compaction events so UIs/consumers can reflect the proactive compaction.
+                  emitAgentEvent({
+                    runId: params.runId,
+                    stream: "compaction",
+                    data: { phase: "start", auto: true },
+                  });
+                  void params.onAgentEvent?.({
+                    stream: "compaction",
+                    data: { phase: "start", auto: true },
+                  });
+
+                  const compactResult = await compactEmbeddedPiSessionDirect({
+                    sessionId: params.sessionId,
+                    sessionKey: params.sessionKey,
+                    messageChannel: params.messageChannel,
+                    messageProvider: params.messageProvider,
+                    agentAccountId: params.agentAccountId,
+                    authProfileId: lastProfileId,
+                    sessionFile: params.sessionFile,
+                    workspaceDir: resolvedWorkspace,
+                    agentDir,
+                    config: params.config,
+                    skillsSnapshot: params.skillsSnapshot,
+                    senderIsOwner: params.senderIsOwner,
+                    provider,
+                    model: modelId,
+                    thinkLevel,
+                    reasoningLevel: params.reasoningLevel,
+                    bashElevated: params.bashElevated,
+                    extraSystemPrompt: params.extraSystemPrompt,
+                    ownerNumbers: params.ownerNumbers,
+                  });
+
+                  emitAgentEvent({
+                    runId: params.runId,
+                    stream: "compaction",
+                    data: { phase: "end", willRetry: false, auto: true },
+                  });
+                  void params.onAgentEvent?.({
+                    stream: "compaction",
+                    data: { phase: "end", willRetry: false, auto: true },
+                  });
+
+                  // Update in-memory rate limit state regardless of outcome.
+                  setAutoCompactState(stateKey, { lastAt: Date.now(), lastAtTokens: totalTokens });
+
+                  if (compactResult.compacted) {
+                    // Retry with compacted transcript.
+                    continue;
+                  }
+                }
+              }
+            } catch (err) {
+              // Fail open: never block the run because auto-compaction preflight failed.
+              setAutoCompactState(stateKey, {
+                lastAt: Date.now(),
+                lastAtTokens: state.lastAtTokens,
+              });
+              log.debug(
+                `session auto-compaction preflight failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
 
           const attempt = await runEmbeddedAttempt({
             sessionId: params.sessionId,
