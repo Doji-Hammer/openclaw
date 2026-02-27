@@ -105,6 +105,20 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    safeguards: z
+      .object({
+        sessionTokenWarning: z
+          .object({
+            enabled: z.boolean().optional(),
+            thresholdTokens: z.number().int().positive().optional(),
+            thresholdContextRatio: z.number().min(0).max(1).optional(),
+            minIntervalMs: z.number().int().positive().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     thinkingDefault: z
       .union([
         z.literal("off"),

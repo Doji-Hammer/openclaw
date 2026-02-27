@@ -291,6 +291,14 @@ const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.humanDelay.mode": "Human Delay Mode",
   "agents.defaults.humanDelay.minMs": "Human Delay Min (ms)",
   "agents.defaults.humanDelay.maxMs": "Human Delay Max (ms)",
+  "agents.defaults.safeguards.sessionTokenWarning": "Session Token Warning",
+  "agents.defaults.safeguards.sessionTokenWarning.enabled": "Session Token Warning Enabled",
+  "agents.defaults.safeguards.sessionTokenWarning.thresholdTokens":
+    "Session Token Warning Threshold Tokens",
+  "agents.defaults.safeguards.sessionTokenWarning.thresholdContextRatio":
+    "Session Token Warning Threshold Ratio",
+  "agents.defaults.safeguards.sessionTokenWarning.minIntervalMs":
+    "Session Token Warning Min Interval (ms)",
   "agents.defaults.cliBackends": "CLI Backends",
   "commands.native": "Native Commands",
   "commands.nativeSkills": "Native Skill Commands",
@@ -650,6 +658,16 @@ const FIELD_HELP: Record<string, string> = {
   "agents.defaults.humanDelay.mode": 'Delay style for block replies ("off", "natural", "custom").',
   "agents.defaults.humanDelay.minMs": "Minimum delay in ms for custom humanDelay (default: 800).",
   "agents.defaults.humanDelay.maxMs": "Maximum delay in ms for custom humanDelay (default: 2500).",
+  "agents.defaults.safeguards.sessionTokenWarning":
+    "Warn when session token usage approaches the configured context window limit.",
+  "agents.defaults.safeguards.sessionTokenWarning.enabled":
+    "Enable session token pressure warnings (default: true).",
+  "agents.defaults.safeguards.sessionTokenWarning.thresholdTokens":
+    "Absolute totalTokens threshold that triggers a warning (default: 120000).",
+  "agents.defaults.safeguards.sessionTokenWarning.thresholdContextRatio":
+    "Context usage ratio (totalTokens/contextTokens) that triggers a warning (default: 0.8).",
+  "agents.defaults.safeguards.sessionTokenWarning.minIntervalMs":
+    "Minimum interval between warnings per session (default: 600000).",
   "commands.native":
     "Register native commands with channels that support it (Discord/Slack/Telegram).",
   "commands.nativeSkills":
