@@ -19,6 +19,7 @@ export {
   loadAuthProfileStore,
   saveAuthProfileStore,
 } from "./auth-profiles/store.js";
+export { autosyncEnvCredentialsToAuthProfiles } from "./auth-profiles/env-autosync.js";
 export type {
   ApiKeyCredential,
   AuthProfileCredential,

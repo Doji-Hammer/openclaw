@@ -132,6 +132,7 @@ Use this when debugging auth or deciding what to back up:
 - **Slack tokens**: config/env (`channels.slack.*`)
 - **Pairing allowlists**: `~/.openclaw/credentials/<channel>-allowFrom.json`
 - **Model auth profiles**: `~/.openclaw/agents/<agentId>/agent/auth-profiles.json`
+  - On gateway start, OpenClaw will **auto-import known provider env vars** (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) into a `provider:env` profile **only if that provider has no profiles yet**. It will never overwrite existing entries.
 - **Legacy OAuth import**: `~/.openclaw/credentials/oauth.json`
   More detail: [Security](/gateway/security#credential-storage-map).
 

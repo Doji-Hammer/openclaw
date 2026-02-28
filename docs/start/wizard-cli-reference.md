@@ -186,6 +186,7 @@ Credential and profile paths:
 
 - OAuth credentials: `~/.openclaw/credentials/oauth.json`
 - Auth profiles (API keys + OAuth): `~/.openclaw/agents/<agentId>/agent/auth-profiles.json`
+  - On gateway boot, OpenClaw may auto-create `provider:env` profiles from known `*_API_KEY` / `*_OAUTH_TOKEN` env vars when a provider has no stored profiles yet.
 
 <Note>
 Headless and server tip: complete OAuth on a machine with a browser, then copy
