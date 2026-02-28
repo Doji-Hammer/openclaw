@@ -1,5 +1,5 @@
-import type { Skill } from "@mariozechner/pi-coding-agent";
 import crypto from "node:crypto";
+import type { Skill } from "@mariozechner/pi-coding-agent";
 import type { NormalizedChatType } from "../../channels/chat-type.js";
 import type { ChannelId } from "../../channels/plugins/types.js";
 import type { DeliveryContext } from "../../utils/delivery-context.js";
@@ -93,6 +93,15 @@ export type SessionEntry = {
   lastThreadId?: string | number;
   skillsSnapshot?: SessionSkillSnapshot;
   systemPromptReport?: SessionSystemPromptReport;
+  /** Timestamp (ms) when we last emitted a session token pressure warning. */
+  sessionTokenWarningLastAt?: number;
+  /** totalTokens value at the time of the last session token pressure warning. */
+  sessionTokenWarningLastAtTokens?: number;
+
+  /** Timestamp (ms) when we last auto-compacted this session (rate-limit state; prevents compaction loops). */
+  sessionAutoCompactLastAt?: number;
+  /** totalTokens value at the time of the last auto-compaction attempt (rate-limit state; survives restarts). */
+  sessionAutoCompactLastAtTokens?: number;
 };
 
 export function mergeSessionEntry(

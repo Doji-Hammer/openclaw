@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
-import type { RunEmbeddedPiAgentParams } from "./run/params.js";
-import type { EmbeddedPiAgentMeta, EmbeddedPiRunResult } from "./types.js";
+import { resolveStorePath } from "../../config/sessions/paths.js";
+import { emitAgentEvent } from "../../infra/agent-events.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
@@ -51,7 +51,17 @@ import { resolveGlobalLane, resolveSessionLane } from "./lanes.js";
 import { log } from "./logger.js";
 import { resolveModel } from "./model.js";
 import { runEmbeddedAttempt } from "./run/attempt.js";
+import type { RunEmbeddedPiAgentParams } from "./run/params.js";
 import { buildEmbeddedRunPayloads } from "./run/payloads.js";
+import {
+  decideAndRecordSessionAutoCompact,
+  estimateSessionTotalTokens,
+  hasOversizedMessageForSummary,
+  readSessionMessagesFromJsonl,
+  recordSessionAutoCompactState,
+  resolveSessionAutoCompactConfig,
+} from "./session-auto-compact.js";
+import type { EmbeddedPiAgentMeta, EmbeddedPiRunResult } from "./types.js";
 import { describeUnknownError } from "./utils.js";
 
 type ApiKeyInfo = ResolvedProviderAuth;
@@ -328,6 +338,127 @@ export async function runEmbeddedPiAgent(
 
           const prompt =
             provider === "anthropic" ? scrubAnthropicRefusalMagic(params.prompt) : params.prompt;
+
+          // Session auto-compaction safeguard: proactively compact when the session
+          // is consuming too much of the context window.
+          const autoCompactCfg = resolveSessionAutoCompactConfig(params.config);
+          if (autoCompactCfg.enabled) {
+            const sessionKey = (params.sessionKey?.trim() || params.sessionId).trim();
+            const storePath = resolveStorePath(params.config?.session?.store, {
+              agentId: workspaceResolution.agentId,
+            });
+
+            try {
+              const now = Date.now();
+              const contextTokens = Math.max(
+                1,
+                Math.floor(model.contextWindow ?? DEFAULT_CONTEXT_TOKENS),
+              );
+              const messages = await readSessionMessagesFromJsonl(params.sessionFile);
+              const totalTokens = estimateSessionTotalTokens(messages);
+
+              const decision = await decideAndRecordSessionAutoCompact({
+                storePath,
+                sessionKey,
+                sessionId: params.sessionId,
+                cfg: autoCompactCfg,
+                totalTokens,
+                contextTokens,
+                now,
+              });
+
+              if (decision.shouldCompact) {
+                if (hasOversizedMessageForSummary(messages, contextTokens)) {
+                  // Never auto-compact when the transcript contains a single oversized entry.
+                  await recordSessionAutoCompactState({
+                    storePath,
+                    sessionKey,
+                    sessionId: params.sessionId,
+                    now,
+                    totalTokens,
+                  });
+                } else {
+                  // Emit compaction events so UIs/consumers can reflect the proactive compaction.
+                  emitAgentEvent({
+                    runId: params.runId,
+                    stream: "compaction",
+                    data: { phase: "start", auto: true },
+                  });
+                  void params.onAgentEvent?.({
+                    stream: "compaction",
+                    data: { phase: "start", auto: true },
+                  });
+
+                  const compactResult = await compactEmbeddedPiSessionDirect({
+                    sessionId: params.sessionId,
+                    sessionKey: params.sessionKey,
+                    messageChannel: params.messageChannel,
+                    messageProvider: params.messageProvider,
+                    agentAccountId: params.agentAccountId,
+                    authProfileId: lastProfileId,
+                    sessionFile: params.sessionFile,
+                    workspaceDir: resolvedWorkspace,
+                    agentDir,
+                    config: params.config,
+                    skillsSnapshot: params.skillsSnapshot,
+                    senderIsOwner: params.senderIsOwner,
+                    provider,
+                    model: modelId,
+                    thinkLevel,
+                    reasoningLevel: params.reasoningLevel,
+                    bashElevated: params.bashElevated,
+                    extraSystemPrompt: params.extraSystemPrompt,
+                    ownerNumbers: params.ownerNumbers,
+                  });
+
+                  emitAgentEvent({
+                    runId: params.runId,
+                    stream: "compaction",
+                    data: { phase: "end", willRetry: false, auto: true },
+                  });
+                  void params.onAgentEvent?.({
+                    stream: "compaction",
+                    data: { phase: "end", willRetry: false, auto: true },
+                  });
+
+                  // We already reserved inside decideAndRecordSessionAutoCompact; ensure persisted even if compaction failed.
+                  await recordSessionAutoCompactState({
+                    storePath,
+                    sessionKey,
+                    sessionId: params.sessionId,
+                    now: Date.now(),
+                    totalTokens,
+                  });
+
+                  if (compactResult.compacted) {
+                    // Retry with compacted transcript.
+                    continue;
+                  }
+                }
+              }
+            } catch (err) {
+              // Fail open: never block the run because auto-compaction preflight failed.
+              // Best-effort: persist a timestamp so we don't spin on repeated failures.
+              try {
+                const sessionKey = (params.sessionKey?.trim() || params.sessionId).trim();
+                const storePath = resolveStorePath(params.config?.session?.store, {
+                  agentId: workspaceResolution.agentId,
+                });
+                await recordSessionAutoCompactState({
+                  storePath,
+                  sessionKey,
+                  sessionId: params.sessionId,
+                  now: Date.now(),
+                  totalTokens: 0,
+                });
+              } catch {
+                // ignore
+              }
+              log.debug(
+                `session auto-compaction preflight failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
+          }
 
           const attempt = await runEmbeddedAttempt({
             sessionId: params.sessionId,
