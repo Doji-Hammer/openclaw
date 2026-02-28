@@ -1,5 +1,5 @@
-import type { Context, Model, Tool } from "@mariozechner/pi-ai/dist/types.js";
 import { convertMessages, convertTools } from "@mariozechner/pi-ai/dist/providers/google-shared.js";
+import type { Context, Model, Tool } from "@mariozechner/pi-ai/dist/types.js";
 import { describe, expect, it } from "vitest";
 
 const asRecord = (value: unknown): Record<string, unknown> => {
@@ -52,7 +52,7 @@ describe("google-shared convertTools", () => {
       },
     ] as unknown as Tool[];
 
-    const converted = convertTools(tools);
+    const converted = convertTools(tools, true);
     const params = asRecord(converted?.[0]?.functionDeclarations?.[0]?.parameters);
 
     expect(params.type).toBeUndefined();
@@ -92,7 +92,7 @@ describe("google-shared convertTools", () => {
       },
     ] as unknown as Tool[];
 
-    const converted = convertTools(tools);
+    const converted = convertTools(tools, true);
     const params = asRecord(converted?.[0]?.functionDeclarations?.[0]?.parameters);
     const properties = asRecord(params.properties);
     const mode = asRecord(properties.mode);
@@ -133,7 +133,7 @@ describe("google-shared convertTools", () => {
       },
     ] as unknown as Tool[];
 
-    const converted = convertTools(tools);
+    const converted = convertTools(tools, true);
     const params = asRecord(converted?.[0]?.functionDeclarations?.[0]?.parameters);
     const config = asRecord(asRecord(params.properties).config);
     const configProps = asRecord(config.properties);
