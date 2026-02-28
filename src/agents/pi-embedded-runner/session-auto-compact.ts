@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { estimateTokens } from "@mariozechner/pi-coding-agent";
 import type { OpenClawConfig } from "../../config/config.js";
+import { updateSessionStore } from "../../config/sessions.js";
+import type { SessionEntry } from "../../config/sessions/types.js";
 import { SAFETY_MARGIN } from "../compaction.js";
 
 export type SessionAutoCompactConfig = {
@@ -120,24 +122,85 @@ export function estimateSessionTotalTokens(messages: AgentMessage[]): number {
   return total;
 }
 
-// Process-local rate-limit state (avoid compaction loops).
-// Keyed by sessionKey/sessionId label.
-const AUTO_COMPACT_STATE = new Map<
-  string,
-  {
-    lastAt: number;
-    lastAtTokens: number;
-  }
->();
-
-export function getAutoCompactState(key: string): { lastAt: number; lastAtTokens: number } {
-  const found = AUTO_COMPACT_STATE.get(key);
-  return found ?? { lastAt: 0, lastAtTokens: 0 };
+export function getSessionAutoCompactState(entry: SessionEntry | undefined): {
+  lastAt: number;
+  lastAtTokens: number;
+} {
+  return {
+    lastAt: entry?.sessionAutoCompactLastAt ?? 0,
+    lastAtTokens: entry?.sessionAutoCompactLastAtTokens ?? 0,
+  };
 }
 
-export function setAutoCompactState(
-  key: string,
-  next: { lastAt: number; lastAtTokens: number },
-): void {
-  AUTO_COMPACT_STATE.set(key, next);
+export async function recordSessionAutoCompactState(params: {
+  storePath: string;
+  sessionKey: string;
+  sessionId: string;
+  now: number;
+  totalTokens: number;
+}): Promise<void> {
+  const { storePath, sessionKey, sessionId, now, totalTokens } = params;
+  await updateSessionStore(storePath, (store) => {
+    const existing = store[sessionKey];
+    const entry: SessionEntry = existing ?? { sessionId, updatedAt: now };
+    store[sessionKey] = {
+      ...entry,
+      sessionId,
+      updatedAt: Math.max(entry.updatedAt ?? 0, now),
+      sessionAutoCompactLastAt: now,
+      sessionAutoCompactLastAtTokens: totalTokens,
+    };
+  });
+}
+
+/**
+ * Atomically decides whether to auto-compact and (if so) records rate-limit state
+ * to the session store to prevent cross-process/restart compaction loops.
+ */
+export async function decideAndRecordSessionAutoCompact(params: {
+  storePath: string;
+  sessionKey: string;
+  sessionId: string;
+  cfg: ResolvedSessionAutoCompactConfig;
+  totalTokens: number;
+  contextTokens: number;
+  now: number;
+}): Promise<SessionAutoCompactDecision> {
+  const { storePath, sessionKey, sessionId, cfg, totalTokens, contextTokens, now } = params;
+
+  let decision: SessionAutoCompactDecision = { shouldCompact: false, reason: "unset" };
+
+  await updateSessionStore(storePath, (store) => {
+    const existing = store[sessionKey];
+    const entry: SessionEntry = existing ?? { sessionId, updatedAt: now };
+    const state = getSessionAutoCompactState(entry);
+
+    decision = decideSessionAutoCompact({
+      cfg,
+      totalTokens,
+      contextTokens,
+      now,
+      lastAutoCompactAt: state.lastAt,
+      lastAutoCompactAtTokens: state.lastAtTokens,
+    });
+
+    if (!decision.shouldCompact) {
+      // Keep store entry intact; do not update timestamps on non-decisions.
+      if (!existing) {
+        store[sessionKey] = entry;
+      }
+      return;
+    }
+
+    // Reserve/rate-limit immediately so concurrent processes won't loop.
+    store[sessionKey] = {
+      ...entry,
+      sessionId,
+      updatedAt: Math.max(entry.updatedAt ?? 0, now),
+      sessionAutoCompactLastAt: now,
+      sessionAutoCompactLastAtTokens: totalTokens,
+    };
+  });
+
+  return decision;
 }
