@@ -1,8 +1,8 @@
-import { type Api, getEnvApiKey, type Model } from "@mariozechner/pi-ai";
 import path from "node:path";
+import { type Api, type Model } from "@mariozechner/pi-ai";
+import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { ModelProviderAuthMode, ModelProviderConfig } from "../config/types.js";
-import { formatCliCommand } from "../cli/command-format.js";
 import { getShellEnvAppliedKeys } from "../infra/shell-env.js";
 import {
   type AuthProfileStore,
@@ -13,6 +13,7 @@ import {
   resolveAuthStorePathForDisplay,
 } from "./auth-profiles.js";
 import { normalizeProviderId } from "./model-selection.js";
+import { resolveEnvApiKey as resolveEnvApiKeyShared } from "./provider-env.js";
 
 export { ensureAuthProfileStore, resolveAuthProfileOrder } from "./auth-profiles.js";
 
@@ -233,82 +234,7 @@ export type EnvApiKeyResult = { apiKey: string; source: string };
 export type ModelAuthMode = "api-key" | "oauth" | "token" | "mixed" | "aws-sdk" | "unknown";
 
 export function resolveEnvApiKey(provider: string): EnvApiKeyResult | null {
-  const normalized = normalizeProviderId(provider);
-  const applied = new Set(getShellEnvAppliedKeys());
-  const pick = (envVar: string): EnvApiKeyResult | null => {
-    const value = process.env[envVar]?.trim();
-    if (!value) {
-      return null;
-    }
-    const source = applied.has(envVar) ? `shell env: ${envVar}` : `env: ${envVar}`;
-    return { apiKey: value, source };
-  };
-
-  if (normalized === "github-copilot") {
-    return pick("COPILOT_GITHUB_TOKEN") ?? pick("GH_TOKEN") ?? pick("GITHUB_TOKEN");
-  }
-
-  if (normalized === "anthropic") {
-    return pick("ANTHROPIC_OAUTH_TOKEN") ?? pick("ANTHROPIC_API_KEY");
-  }
-
-  if (normalized === "chutes") {
-    return pick("CHUTES_OAUTH_TOKEN") ?? pick("CHUTES_API_KEY");
-  }
-
-  if (normalized === "zai") {
-    return pick("ZAI_API_KEY") ?? pick("Z_AI_API_KEY");
-  }
-
-  if (normalized === "google-vertex") {
-    const envKey = getEnvApiKey(normalized);
-    if (!envKey) {
-      return null;
-    }
-    return { apiKey: envKey, source: "gcloud adc" };
-  }
-
-  if (normalized === "opencode") {
-    return pick("OPENCODE_API_KEY") ?? pick("OPENCODE_ZEN_API_KEY");
-  }
-
-  if (normalized === "qwen-portal") {
-    return pick("QWEN_OAUTH_TOKEN") ?? pick("QWEN_PORTAL_API_KEY");
-  }
-
-  if (normalized === "minimax-portal") {
-    return pick("MINIMAX_OAUTH_TOKEN") ?? pick("MINIMAX_API_KEY");
-  }
-
-  if (normalized === "kimi-coding") {
-    return pick("KIMI_API_KEY") ?? pick("KIMICODE_API_KEY");
-  }
-
-  const envMap: Record<string, string> = {
-    openai: "OPENAI_API_KEY",
-    google: "GEMINI_API_KEY",
-    voyage: "VOYAGE_API_KEY",
-    groq: "GROQ_API_KEY",
-    deepgram: "DEEPGRAM_API_KEY",
-    cerebras: "CEREBRAS_API_KEY",
-    xai: "XAI_API_KEY",
-    openrouter: "OPENROUTER_API_KEY",
-    "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
-    "cloudflare-ai-gateway": "CLOUDFLARE_AI_GATEWAY_API_KEY",
-    moonshot: "MOONSHOT_API_KEY",
-    minimax: "MINIMAX_API_KEY",
-    xiaomi: "XIAOMI_API_KEY",
-    synthetic: "SYNTHETIC_API_KEY",
-    venice: "VENICE_API_KEY",
-    mistral: "MISTRAL_API_KEY",
-    opencode: "OPENCODE_API_KEY",
-    ollama: "OLLAMA_API_KEY",
-  };
-  const envVar = envMap[normalized];
-  if (!envVar) {
-    return null;
-  }
-  return pick(envVar);
+  return resolveEnvApiKeyShared(provider);
 }
 
 export function resolveModelAuthMode(
