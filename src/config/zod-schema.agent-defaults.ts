@@ -90,6 +90,7 @@ export const AgentDefaultsSchema = z
       .optional(),
     compaction: z
       .object({
+        strategy: z.enum(["semantic_guardian", "ephemeral"]).optional(),
         mode: z.union([z.literal("default"), z.literal("safeguard")]).optional(),
         reserveTokensFloor: z.number().int().nonnegative().optional(),
         maxHistoryShare: z.number().min(0.1).max(0.9).optional(),

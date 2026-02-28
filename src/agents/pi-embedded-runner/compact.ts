@@ -1,17 +1,15 @@
+import * as fs from "node:fs/promises";
+import os from "node:os";
 import {
   createAgentSession,
   estimateTokens,
   SessionManager,
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import fs from "node:fs/promises";
-import os from "node:os";
-import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
-import type { OpenClawConfig } from "../../config/config.js";
-import type { ExecElevatedDefaults } from "../bash-tools.js";
-import type { EmbeddedPiCompactResult } from "./types.js";
 import { resolveHeartbeatPrompt } from "../../auto-reply/heartbeat.js";
+import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
 import { resolveChannelCapabilities } from "../../config/channel-capabilities.js";
+import type { OpenClawConfig } from "../../config/config.js";
 import { getMachineDisplayName } from "../../infra/machine-name.js";
 import { type enqueueCommand, enqueueCommandInLane } from "../../process/command-queue.js";
 import { isSubagentSessionKey } from "../../routing/session-key.js";
@@ -24,6 +22,7 @@ import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
 import { resolveSessionAgentIds } from "../agent-scope.js";
+import type { ExecElevatedDefaults } from "../bash-tools.js";
 import { makeBootstrapWarn, resolveBootstrapContextForRun } from "../bootstrap-files.js";
 import { listChannelSupportedActions, resolveChannelMessageToolHints } from "../channel-tools.js";
 import { formatUserTime, resolveUserTimeFormat, resolveUserTimezone } from "../date-time.js";
@@ -53,6 +52,7 @@ import {
   type SkillSnapshot,
 } from "../skills.js";
 import { resolveTranscriptPolicy } from "../transcript-policy.js";
+import { savePreCompactDump, validateCompaction } from "./compact-validator.js";
 import { buildEmbeddedExtensionPaths } from "./extensions.js";
 import {
   logToolSchemasForGoogle,
@@ -71,6 +71,7 @@ import {
   createSystemPromptOverride,
 } from "./system-prompt.js";
 import { splitSdkTools } from "./tool-split.js";
+import type { EmbeddedPiCompactResult } from "./types.js";
 import { describeUnknownError, mapThinkingLevel, resolveExecToolDefaults } from "./utils.js";
 
 export type CompactEmbeddedPiSessionParams = {
@@ -108,12 +109,34 @@ export type CompactEmbeddedPiSessionParams = {
 };
 
 /**
- * Core compaction logic without lane queueing.
- * Use this when already inside a session/global lane to avoid deadlocks.
+ * Core compaction logic - runs a single proposal attempt.
  */
-export async function compactEmbeddedPiSessionDirect(
+async function runSingleCompactionProposal(
   params: CompactEmbeddedPiSessionParams,
 ): Promise<EmbeddedPiCompactResult> {
+  const strategy = params.config?.agents?.defaults?.compaction?.strategy;
+  if (strategy === "ephemeral") {
+    // Ephemeral strategy: wipe session instead of compacting
+    const sessionLock = await acquireSessionWriteLock({
+      sessionFile: params.sessionFile,
+    });
+    try {
+      await fs.writeFile(params.sessionFile, "[]", "utf-8");
+      return {
+        ok: true,
+        compacted: true,
+        result: {
+          summary: "Session wiped (ephemeral strategy)",
+          firstKeptEntryId: "new",
+          tokensBefore: 0,
+          tokensAfter: 0,
+        },
+      };
+    } finally {
+      await sessionLock.release();
+    }
+  }
+
   const resolvedWorkspace = resolveUserPath(params.workspaceDir);
   const prevCwd = process.cwd();
 
@@ -434,22 +457,23 @@ export async function compactEmbeddedPiSessionDirect(
         if (limited.length > 0) {
           session.agent.replaceMessages(limited);
         }
+
         const result = await session.compact(params.customInstructions);
-        // Estimate tokens after compaction by summing token estimates for remaining messages
+
+        // Estimate tokens after compaction
         let tokensAfter: number | undefined;
         try {
           tokensAfter = 0;
           for (const message of session.messages) {
             tokensAfter += estimateTokens(message);
           }
-          // Sanity check: tokensAfter should be less than tokensBefore
           if (tokensAfter > result.tokensBefore) {
-            tokensAfter = undefined; // Don't trust the estimate
+            tokensAfter = undefined;
           }
         } catch {
-          // If estimation fails, leave tokensAfter undefined
           tokensAfter = undefined;
         }
+
         return {
           ok: true,
           compacted: true,
@@ -478,6 +502,96 @@ export async function compactEmbeddedPiSessionDirect(
     restoreSkillEnv?.();
     process.chdir(prevCwd);
   }
+}
+
+/**
+ * Proposer - runs a single compaction proposal attempt using model rotation
+ */
+async function runProposerCompaction(
+  params: CompactEmbeddedPiSessionParams,
+  round: number,
+): Promise<EmbeddedPiCompactResult> {
+  const modelOrder = [
+    params.model,
+    "anthropic/claude-sonnet-4-6",
+    "google/gemini-3-flash-preview",
+    "ollama/qwen3-coder-next",
+  ];
+  const roundModel = modelOrder[(round - 1) % modelOrder.length] || params.model;
+
+  // For rounds after 1, inject forced variance prompt
+  const customInstructions =
+    round > 1
+      ? `[Round ${round} - Previous attempts failed; MUST generate different AST/compaction approach]\n\n${params.customInstructions || ""}`
+      : params.customInstructions;
+
+  return runSingleCompactionProposal({
+    ...params,
+    model: roundModel,
+    customInstructions,
+  });
+}
+
+/**
+ * Implementation of SPEC v2.0 Round-Robin Compaction with Guardian Escort validation.
+ */
+export async function compactWithRoundRobin(
+  params: CompactEmbeddedPiSessionParams,
+): Promise<EmbeddedPiCompactResult> {
+  const compactionConfig = params.config?.agents?.defaults?.compaction;
+  // Use any cast to allow custom SPEC v2.0 config properties
+  const maxRounds = (compactionConfig as any)?.maxRounds || 9;
+  const requiredConsensus = (compactionConfig as any)?.requiredConsensus || 2;
+
+  // Step 1: Save pre-compact dump for Guardian Escort
+  const preCompactDump = await savePreCompactDump(params.sessionFile, params.sessionId);
+
+  const approvedResults: EmbeddedPiCompactResult[] = [];
+
+  for (let round = 1; round <= maxRounds; round++) {
+    log.info(`Compaction Round ${round}/${maxRounds} starting...`);
+
+    // Step 2: Proposer runs
+    const result = await runProposerCompaction(params, round);
+
+    // Step 3: Guardian Escort validates
+    const validation = await validateCompaction(preCompactDump, result);
+
+    if (validation.approved) {
+      log.info(`Compaction Round ${round} APPROVED.`);
+      approvedResults.push(result);
+
+      // Step 4: Consensus check (simple approval count for now)
+      if (approvedResults.length >= requiredConsensus) {
+        log.info(`Compaction consensus reached after ${round} rounds.`);
+        return approvedResults[0]!;
+      }
+    } else {
+      log.warn(`Compaction Round ${round} REJECTED: ${validation.reasons?.join(", ")}`);
+    }
+  }
+
+  return {
+    ok: false,
+    compacted: false,
+    reason: `Compaction failed: consensus not reached after ${maxRounds} rounds. Human intervention required.`,
+  };
+}
+
+/**
+ * Core compaction entry point.
+ */
+export async function compactEmbeddedPiSessionDirect(
+  params: CompactEmbeddedPiSessionParams,
+): Promise<EmbeddedPiCompactResult> {
+  // If we are doing a sub-call for a single proposal, we bypass the round-robin logic
+  // (We use a hacky check for customInstructions prefix to detect sub-calls)
+  if (params.customInstructions?.includes("Previous attempts failed")) {
+    return runSingleCompactionProposal(params);
+  }
+
+  // Use the round-robin logic for the main call
+  return compactWithRoundRobin(params);
 }
 
 /**

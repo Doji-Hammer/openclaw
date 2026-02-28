@@ -246,6 +246,8 @@ export type AgentDefaultsConfig = {
 export type AgentCompactionMode = "default" | "safeguard";
 
 export type AgentCompactionConfig = {
+  /** Compaction strategy: semantic_guardian (asynchronous advisory board) or ephemeral (session reset). */
+  strategy?: "semantic_guardian" | "ephemeral";
   /** Compaction summarization mode. */
   mode?: AgentCompactionMode;
   /** Minimum reserve tokens enforced for Pi compaction (0 disables the floor). */
